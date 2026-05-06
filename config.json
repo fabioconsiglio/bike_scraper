@@ -1,7 +1,7 @@
 {
   "search": {
-    "query": "canyon grail",
-    "required_keywords": ["canyon", "grail"],
+    "query": "schmolke carbon",
+    "required_keywords": ["schmolke", "carbon"],
     "platforms": ["kleinanzeigen", "ebay", "olx", "allegro"]
   },
   "email": {
