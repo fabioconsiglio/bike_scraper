@@ -1,12 +1,14 @@
 {
   "search": {
-    "query": "schmolke carbon",
-    "required_keywords": ["schmolke", "carbon"],
-    "platforms": ["kleinanzeigen", "olx"]
+    "query": "Schmolke Carbon",
+    "required_keywords": ["schmolke"],
+    "platforms": ["kleinanzeigen", "olx"],
+    "reference_image": "stolen_bike.jpg",
+    "similarity_threshold": 0.82
   },
   "email": {
     "sender": "REDACTED_EMAIL",
-    "recipient": "REDACTED_EMAIL_2",
+    "recipient": ["REDACTED_EMAIL_2"],
     "app_password": ""
   }
 }

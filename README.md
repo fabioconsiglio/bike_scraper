@@ -1,8 +1,7 @@
 # 🚴 Schmolke Carbon Bike Scraper
 
-Monitors **Kleinanzeigen**, **eBay.de**, **OLX.pl**, **Allegro.pl**, and **Otomoto.pl** for
-Schmolke Carbon bike listings. Only emails you listings that genuinely contain your keywords —
-crucial for Polish platforms which return many unrelated results.
+Monitors **Kleinanzeigen** and **OLX.pl** for
+Schmolke Carbon bike listings. Only emails you listings that genuinely contain your keywords — crucial for Polish platforms which return many unrelated results.
 
 ---
 
@@ -31,7 +30,7 @@ bike-scraper/
   "search": {
     "query": "Schmolke Carbon",
     "required_keywords": ["schmolke", "carbon"],
-    "platforms": ["kleinanzeigen", "ebay", "olx", "allegro", "otomoto"]
+    "platforms": ["kleinanzeigen", "ebay", "olx", "allegro"]
   },
   "email": {
     "sender": "your.gmail@gmail.com",
@@ -82,7 +81,7 @@ python bike_scraper.py
 
 ## How the keyword filter works
 
-Polish platforms (OLX, Allegro, Otomoto) often return listings that don't contain
+Polish platforms (OLX) often return listings that don't contain
 your search string at all. After scraping, each listing title is checked against
 `required_keywords` — **all** words must be present (case-insensitive) for the
 listing to pass through. Anything that doesn't match is silently dropped.
@@ -99,9 +98,5 @@ You can make the filter stricter or looser by editing `required_keywords`:
 
 ## ⚠️ Notes on scraping
 
-- **Allegro / Otomoto** render parts of their pages via JavaScript. The static HTML
-  scraping works for many listings but may miss some. If you want fuller coverage,
-  adding a `playwright` or `selenium` step is an option.
-- **Otomoto** is a vehicle platform, so Schmolke results will be rare — the filter
-  makes sure only genuine matches get through.
+
 - Random 2–4.5 s delays between requests keep traffic polite.
