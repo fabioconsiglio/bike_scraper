@@ -260,46 +260,6 @@ def scrape_allegro(query: str, required: list[str]) -> list[dict]:
     return listings
 
 
-def scrape_otomoto(query: str, required: list[str]) -> list[dict]:
-    """
-    Otomoto.pl – primarily cars/motorcycles but occasionally lists bikes.
-    Uses the search endpoint; strict keyword filter is extra important here.
-    """
-    listings = []
-    try:
-        url = f"https://www.otomoto.pl/osobowe?search%5Bfilter_enum_damaged%5D=0&search%5Badvanced_search_expanded%5D=true&search%5Bphrase%5D={quote_plus(query)}"
-        resp = _get(url, headers=HEADERS_PL)
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        for card in soup.select("article[data-id], article.ooa-1t80gpj"):
-            title_el   = card.select_one("h2, h1[data-seo]")
-            price_el   = card.select_one("[data-seo='ad-price'] span, span.offer-price__number")
-            loc_el     = card.select_one("p[data-seo*='location']")
-            link_el    = card.select_one("a[href*='otomoto.pl/oferta/']")
-
-            if not (title_el and link_el):
-                continue
-
-            title = title_el.get_text(strip=True)
-            href  = link_el.get("href", "").split("?")[0]
-
-            if not matches_keywords(title, required):
-                continue
-
-            listings.append({
-                "id":      _id(href),
-                "title":   title,
-                "price":   price_el.get_text(strip=True) if price_el else "N/A",
-                "location": loc_el.get_text(strip=True) if loc_el else "N/A",
-                "url":     href,
-                "source":  "Otomoto.pl",
-            })
-
-        print(f"  [Otomoto.pl] {len(listings)} matching listings")
-    except Exception as exc:
-        print(f"  [Otomoto.pl] ERROR: {exc}")
-    _sleep()
-    return listings
 
 
 # ──────────────────────────────────────────────
@@ -428,8 +388,7 @@ SCRAPER_MAP = {
     "kleinanzeigen": scrape_kleinanzeigen,
     "ebay":          scrape_ebay,
     "olx":           scrape_olx,
-    "allegro":       scrape_allegro,
-    "otomoto":       scrape_otomoto,
+    "allegro":       scrape_allegro
 }
 
 
