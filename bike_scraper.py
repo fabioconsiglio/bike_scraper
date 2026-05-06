@@ -19,6 +19,10 @@ from urllib.parse import quote_plus
 import requests
 from bs4 import BeautifulSoup
 
+
+
+from curl_cffi import requests as cffi_requests
+
 # ──────────────────────────────────────────────
 # Paths
 # ──────────────────────────────────────────────
@@ -40,9 +44,15 @@ HEADERS_DE = {
 HEADERS_PL = {**HEADERS_DE, "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8"}
 
 
-def _get(url: str, headers: dict = HEADERS_DE, timeout: int = 20) -> requests.Response:
-    return requests.get(url, headers=headers, timeout=timeout)
-
+def _get(url: str, headers: dict = HEADERS_DE, timeout: int = 20):
+    # 'impersonate' perfectly mimics a real Chrome browser's fingerprint
+    resp = cffi_requests.get(url, headers=headers, timeout=timeout, impersonate="chrome120")
+    
+    # Fail loudly so you know if you get blocked!
+    if resp.status_code != 200:
+        print(f"    [!] Warning: Got HTTP {resp.status_code} from {url}")
+        
+    return resp
 
 def _id(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()
@@ -92,24 +102,36 @@ def save_seen(seen: set) -> None:
 # ──────────────────────────────────────────────
 
 def scrape_kleinanzeigen(query: str, required: list[str]) -> list[dict]:
-    """eBay Kleinanzeigen (kleinanzeigen.de) – formerly eBay Kleinanzeigen"""
+    """eBay Kleinanzeigen (kleinanzeigen.de)"""
     listings = []
     try:
-        url = f"https://www.kleinanzeigen.de/s-anzeige:angebote/preis:0:/k0?keywords={quote_plus(query)}"
+        # Format the query with hyphens (e.g., "Schmolke Carbon" -> "schmolke-carbon")
+        formatted_query = query.strip().lower().replace(" ", "-")
+        url = f"https://www.kleinanzeigen.de/s-{formatted_query}/k0"
+        
         resp = _get(url)
-        soup = BeautifulSoup(resp.text, "html.parser")
+        
+        if resp.status_code != 200:
+            print(f"  [Kleinanzeigen] BLOCKED or ERROR: HTTP {resp.status_code}")
+            return listings
 
-        for card in soup.select("article.aditem"):
-            title_el = card.select_one(".ellipsis, h2.text-module-begin, [class*='title']")
+        soup = BeautifulSoup(resp.text, "html.parser")
+        
+        # Select all listing cards
+        cards = soup.select("article.aditem")
+        if not cards:
+            print("  [Kleinanzeigen] No cards found in the HTML. (Check browser to see if the query yields results)")
+
+        for card in cards:
+            title_el = card.select_one("a.ellipsis")
             price_el = card.select_one("p.aditem-main--middle--price-shipping--price")
             loc_el   = card.select_one("div.aditem-main--top--left")
-            link_el  = card.select_one("a[href*='/s-anzeige/']")
-
-            if not (title_el and link_el):
+            
+            if not title_el:
                 continue
 
             title = title_el.get_text(strip=True)
-            href  = link_el.get("href", "")
+            href  = title_el.get("href", "")
             link  = "https://www.kleinanzeigen.de" + href if href.startswith("/") else href
 
             # Strict keyword check
@@ -128,24 +150,34 @@ def scrape_kleinanzeigen(query: str, required: list[str]) -> list[dict]:
         print(f"  [Kleinanzeigen] {len(listings)} matching listings")
     except Exception as exc:
         print(f"  [Kleinanzeigen] ERROR: {exc}")
+    
     _sleep()
     return listings
-
 
 def scrape_ebay(query: str, required: list[str]) -> list[dict]:
     """eBay.de – search results page"""
     listings = []
     try:
-        # Search in all categories, sort by newly listed
         url = (
             f"https://www.ebay.de/sch/i.html"
             f"?_nkw={quote_plus(query)}&_sop=10&LH_ItemCondition=3000"
         )
         resp = _get(url)
+        
+        if resp.status_code != 200:
+            print(f"  [eBay] BLOCKED or ERROR: HTTP {resp.status_code}")
+            return listings
+
         soup = BeautifulSoup(resp.text, "html.parser")
 
         for card in soup.select("li.s-item"):
-            title_el = card.select_one(".s-item__title")
+            # eBay injects a dummy item at the top of results with a specific ID or missing data
+            if card.get("data-view", "") == "" and "s-item__pl-on-bottom" not in card.get("class", []):
+                # Just a safeguard, but we rely on title validation mostly
+                pass
+
+            # Titles on eBay are often nested in a div with role=heading
+            title_el = card.select_one(".s-item__title span, .s-item__title")
             price_el = card.select_one(".s-item__price")
             loc_el   = card.select_one(".s-item__location")
             link_el  = card.select_one("a.s-item__link")
@@ -153,22 +185,27 @@ def scrape_ebay(query: str, required: list[str]) -> list[dict]:
             if not (title_el and link_el):
                 continue
 
+            # Remove hidden "New Listing" texts by only taking the primary text node if possible
             title = title_el.get_text(strip=True)
-            if title.lower().startswith("shop on ebay"):
+            if "shop on ebay" in title.lower():
                 continue
 
-            href = link_el.get("href", "").split("?")[0]
+            href = link_el.get("href", "")
+            if not href: 
+                continue
+                
+            # Clean up the massive eBay tracking URLs
+            clean_href = href.split("?")[0]
 
-            # Strict keyword check
             if not matches_keywords(title, required):
                 continue
 
             listings.append({
-                "id":      _id(href),
+                "id":      _id(clean_href),
                 "title":   title,
                 "price":   price_el.get_text(strip=True) if price_el else "N/A",
                 "location": loc_el.get_text(strip=True) if loc_el else "N/A",
-                "url":     href,
+                "url":     clean_href,
                 "source":  "eBay",
             })
 
@@ -178,19 +215,27 @@ def scrape_ebay(query: str, required: list[str]) -> list[dict]:
     _sleep()
     return listings
 
-
 def scrape_olx(query: str, required: list[str]) -> list[dict]:
     """OLX.pl – Polish classifieds"""
     listings = []
     try:
-        url = f"https://www.olx.pl/oferty/q-{quote_plus(query).replace('%20', '-')}/"
+        # OLX prefers clean hyphens instead of URL encoding for the path
+        formatted_query = query.strip().lower().replace(" ", "-")
+        url = f"https://www.olx.pl/oferty/q-{formatted_query}/"
+        
         resp = _get(url, headers=HEADERS_PL)
+        
+        if resp.status_code != 200:
+            print(f"  [OLX.pl] BLOCKED or ERROR: HTTP {resp.status_code}")
+            return listings
+
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        for card in soup.select("[data-cy='l-card'], div.css-1sw3lx0"):
-            title_el = card.select_one("h6, h4, [data-cy='ad-card-title']")
-            price_el = card.select_one("[data-testid='ad-price'], p.css-tyui9s")
-            loc_el   = card.select_one("[data-testid='location-date'], p.css-1a4brun")
+        # Relying heavily on data attributes rather than randomized CSS classes
+        for card in soup.select("[data-cy='l-card']"):
+            title_el = card.select_one("h6")
+            price_el = card.select_one("[data-testid='ad-price']")
+            loc_el   = card.select_one("[data-testid='location-date']")
             link_el  = card.select_one("a[href]")
 
             if not (title_el and link_el):
@@ -200,7 +245,6 @@ def scrape_olx(query: str, required: list[str]) -> list[dict]:
             href  = link_el.get("href", "")
             link  = href if href.startswith("http") else "https://www.olx.pl" + href
 
-            # Polish sites return many unrelated results – enforce strict matching
             if not matches_keywords(title, required):
                 continue
 
@@ -224,31 +268,49 @@ def scrape_allegro(query: str, required: list[str]) -> list[dict]:
     """Allegro.pl – Poland's largest marketplace"""
     listings = []
     try:
-        url = f"https://allegro.pl/listing?string={quote_plus(query)}&order=n"  # order=n → newest
+        url = f"https://allegro.pl/listing?string={quote_plus(query)}&order=n"
         resp = _get(url, headers=HEADERS_PL)
+        
+        if resp.status_code != 200:
+            print(f"  [Allegro.pl] BLOCKED or ERROR: HTTP {resp.status_code}")
+            return listings
+
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Allegro renders heavily via JS; try static article cards
-        for card in soup.select("article, div[data-role='offer-card']"):
-            title_el = card.select_one("h2, a[data-analytics-view-label='title']")
-            price_el = card.select_one("[data-price-amount], [aria-label*='zł']")
-            link_el  = card.select_one("a[href*='/oferta/']")
+        # Allegro uses articles, but class names are hashed. Look for specific generic roles or structures
+        cards = soup.select("article[data-role='offer-card'], article, div.opbox-listing-card")
+        
+        if not cards:
+            print("  [Allegro.pl] Warning: No article elements found. Page might require JavaScript rendering.")
+
+        for card in cards:
+            title_el = card.select_one("h2, a[title]")
+            price_el = card.select_one("span[aria-label*='zł'], span.fee8042")
+            link_el  = card.select_one("a[href*='/oferta/'], h2 a")
 
             if not (title_el and link_el):
                 continue
 
             title = title_el.get_text(strip=True)
             href  = link_el.get("href", "")
+            
+            # Filter out generic links
+            if "/oferta/" not in href:
+                continue
+
             link  = href if href.startswith("http") else "https://allegro.pl" + href
 
             if not matches_keywords(title, required):
                 continue
 
+            # Handle price text cleanup (often has "z" and "ł" split)
+            price_text = price_el.get_text(separator=" ", strip=True) if price_el else "N/A"
+
             listings.append({
                 "id":      _id(link),
                 "title":   title,
-                "price":   price_el.get_text(strip=True) if price_el else "N/A",
-                "location": "Allegro.pl",
+                "price":   price_text,
+                "location": "Allegro.pl",  # Allegro doesn't expose location on the search card reliably
                 "url":     link,
                 "source":  "Allegro.pl",
             })
@@ -258,7 +320,6 @@ def scrape_allegro(query: str, required: list[str]) -> list[dict]:
         print(f"  [Allegro.pl] ERROR: {exc}")
     _sleep()
     return listings
-
 
 
 
