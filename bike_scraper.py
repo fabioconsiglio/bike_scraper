@@ -386,5 +386,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-
-     main() # Keep your main function commented out until these return 200
+    main()
