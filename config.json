@@ -2,11 +2,11 @@
   "search": {
     "query": "Schmolke Carbon",
     "required_keywords": ["schmolke", "carbon"],
-    "platforms": ["kleinanzeigen", "ebay", "olx", "allegro", "otomoto"]
+    "platforms": ["kleinanzeigen", "ebay", "olx", "allegro"]
   },
   "email": {
-    "sender": "your.gmail@gmail.com",
-    "recipient": "your.gmail@gmail.com",
+    "sender": "fabi.mahner@gmail.com",
+    "recipient": "fabian.mahner@uni.kn",
     "app_password": ""
   }
 }
