@@ -178,67 +178,6 @@ def scrape_kleinanzeigen(query: str, required: list[str]) -> list[dict]:
     _sleep()
     return listings
 
-def scrape_ebay(query: str, required: list[str]) -> list[dict]:
-    """eBay.de – search results page"""
-    listings = []
-    try:
-        url = (
-            f"https://www.ebay.de/sch/i.html"
-            f"?_nkw={quote_plus(query)}&_sop=10&LH_ItemCondition=3000"
-        )
-        resp = _get(url)
-        
-        if resp.status_code != 200:
-            print(f"  [eBay] BLOCKED or ERROR: HTTP {resp.status_code}")
-            return listings
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        for card in soup.select("li.s-item"):
-            # eBay injects a dummy item at the top of results with a specific ID or missing data
-            if card.get("data-view", "") == "" and "s-item__pl-on-bottom" not in card.get("class", []):
-                # Just a safeguard, but we rely on title validation mostly
-                pass
-
-            # Titles on eBay are often nested in a div with role=heading
-            title_el = card.select_one(".s-item__title span, .s-item__title")
-            price_el = card.select_one(".s-item__price")
-            loc_el   = card.select_one(".s-item__location")
-            link_el  = card.select_one("a.s-item__link")
-
-            if not (title_el and link_el):
-                continue
-
-            # Remove hidden "New Listing" texts by only taking the primary text node if possible
-            title = title_el.get_text(strip=True)
-            if "shop on ebay" in title.lower():
-                continue
-
-            href = link_el.get("href", "")
-            if not href: 
-                continue
-                
-            # Clean up the massive eBay tracking URLs
-            clean_href = href.split("?")[0]
-
-            if not matches_keywords(title, required):
-                continue
-
-            listings.append({
-                "id":      _id(clean_href),
-                "title":   title,
-                "price":   price_el.get_text(strip=True) if price_el else "N/A",
-                "location": loc_el.get_text(strip=True) if loc_el else "N/A",
-                "url":     clean_href,
-                "source":  "eBay",
-            })
-
-        print(f"  [eBay] {len(listings)} matching listings")
-    except Exception as exc:
-        print(f"  [eBay] ERROR: {exc}")
-    _sleep()
-    return listings
-
 def scrape_olx(query: str, required: list[str]) -> list[dict]:
     """OLX.pl – Polish classifieds"""
     listings = []
@@ -287,63 +226,6 @@ def scrape_olx(query: str, required: list[str]) -> list[dict]:
     _sleep()
     return listings
 
-
-def scrape_allegro(query: str, required: list[str]) -> list[dict]:
-    """Allegro.pl – Poland's largest marketplace"""
-    listings = []
-    try:
-        url = f"https://allegro.pl/listing?string={quote_plus(query)}&order=n"
-        resp = _get(url, headers=HEADERS_PL)
-        
-        if resp.status_code != 200:
-            print(f"  [Allegro.pl] BLOCKED or ERROR: HTTP {resp.status_code}")
-            return listings
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        # Allegro uses articles, but class names are hashed. Look for specific generic roles or structures
-        cards = soup.select("article[data-role='offer-card'], article, div.opbox-listing-card")
-        
-        if not cards:
-            print("  [Allegro.pl] Warning: No article elements found. Page might require JavaScript rendering.")
-
-        for card in cards:
-            title_el = card.select_one("h2, a[title]")
-            price_el = card.select_one("span[aria-label*='zł'], span.fee8042")
-            link_el  = card.select_one("a[href*='/oferta/'], h2 a")
-
-            if not (title_el and link_el):
-                continue
-
-            title = title_el.get_text(strip=True)
-            href  = link_el.get("href", "")
-            
-            # Filter out generic links
-            if "/oferta/" not in href:
-                continue
-
-            link  = href if href.startswith("http") else "https://allegro.pl" + href
-
-            if not matches_keywords(title, required):
-                continue
-
-            # Handle price text cleanup (often has "z" and "ł" split)
-            price_text = price_el.get_text(separator=" ", strip=True) if price_el else "N/A"
-
-            listings.append({
-                "id":      _id(link),
-                "title":   title,
-                "price":   price_text,
-                "location": "Allegro.pl",  # Allegro doesn't expose location on the search card reliably
-                "url":     link,
-                "source":  "Allegro.pl",
-            })
-
-        print(f"  [Allegro.pl] {len(listings)} matching listings")
-    except Exception as exc:
-        print(f"  [Allegro.pl] ERROR: {exc}")
-    _sleep()
-    return listings
 
 
 
@@ -471,9 +353,7 @@ def send_email(cfg: dict, new_listings: list[dict]) -> None:
 
 SCRAPER_MAP = {
     "kleinanzeigen": scrape_kleinanzeigen,
-    "ebay":          scrape_ebay,
-    "olx":           scrape_olx,
-    "allegro":       scrape_allegro
+    "olx":           scrape_olx
 }
 
 
@@ -507,12 +387,4 @@ def main() -> None:
 
 if __name__ == "__main__":
 
-    print("Testing eBay...")
-    r_ebay = _get("https://www.ebay.de/sch/i.html?_nkw=canyon+grail")
-    print(f"eBay Status: {r_ebay.status_code} | Length: {len(r_ebay.text)}")
-    
-    print("Testing Allegro...")
-    r_allegro = _get("https://allegro.pl/listing?string=canyon+grail")
-    print(f"Allegro Status: {r_allegro.status_code} | Length: {len(r_allegro.text)}")
-    
-    # main() # Keep your main function commented out until these return 200
+     main() # Keep your main function commented out until these return 200
