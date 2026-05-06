@@ -32,7 +32,7 @@ jobs:
       - name: Install Dependencies
         run: |
           # Install CPU-only PyTorch to save space and time on GitHub Actions
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
       - name: Run Scraper
