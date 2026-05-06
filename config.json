@@ -1,0 +1,12 @@
+{
+  "search": {
+    "query": "Schmolke Carbon",
+    "required_keywords": ["schmolke", "carbon"],
+    "platforms": ["kleinanzeigen", "ebay", "olx", "allegro", "otomoto"]
+  },
+  "email": {
+    "sender": "your.gmail@gmail.com",
+    "recipient": "your.gmail@gmail.com",
+    "app_password": ""
+  }
+}
