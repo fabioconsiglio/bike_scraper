@@ -1,12 +1,14 @@
 {
   "search": {
-    "query": "schmolke carbon",
-    "required_keywords": ["schmolke", "carbon"],
-    "platforms": ["kleinanzeigen", "olx"]
+    "query": "Schmolke Carbon",
+    "required_keywords": ["schmolke"],
+    "platforms": ["kleinanzeigen", "olx"],
+    "reference_image": "stolen_bike.jpg",
+    "similarity_threshold": 0.82
   },
   "email": {
     "sender": "fabi.mahner@gmail.com",
-    "recipient": "fabian.mahner@uni.kn",
+    "recipient": ["fabian.mahner@uni.kn"],
     "app_password": ""
   }
 }
