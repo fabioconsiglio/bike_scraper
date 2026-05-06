@@ -43,16 +43,40 @@ HEADERS_DE = {
 }
 HEADERS_PL = {**HEADERS_DE, "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8"}
 
+# Use a clean, minimal header block. 
+# Too many custom headers can actually trigger bot flags.
+HEADERS = {
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+}
 
-def _get(url: str, headers: dict = HEADERS_DE, timeout: int = 20):
-    # 'impersonate' perfectly mimics a real Chrome browser's fingerprint
-    resp = cffi_requests.get(url, headers=headers, timeout=timeout, impersonate="chrome120")
+def _get(url: str, headers: dict = HEADERS, timeout: int = 20):
+    # Randomize the browser profile to avoid static fingerprinting
+    browsers = ["chrome124", "chrome120", "safari17_0", "edge122"]
+    chosen_browser = random.choice(browsers)
     
-    # Fail loudly so you know if you get blocked!
-    if resp.status_code != 200:
-        print(f"    [!] Warning: Got HTTP {resp.status_code} from {url}")
+    try:
+        resp = cffi_requests.get(
+            url, 
+            headers=headers, 
+            timeout=timeout, 
+            impersonate=chosen_browser
+        )
         
-    return resp
+        if resp.status_code != 200:
+            print(f"    [!] Warning: Got HTTP {resp.status_code} from {url}")
+            # Quick check to see if it's a hard block or a Captcha
+            if "captcha" in resp.text.lower() or "verify you are human" in resp.text.lower():
+                print("    [!] We hit a CAPTCHA wall.")
+                
+        return resp
+    except Exception as e:
+        print(f"    [!] Connection error: {e}")
+        # Return a dummy response object so the script doesn't crash
+        class DummyResp:
+            status_code = 500
+            text = ""
+        return DummyResp()
 
 def _id(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()
@@ -482,4 +506,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+
+    print("Testing eBay...")
+    r_ebay = _get("https://www.ebay.de/sch/i.html?_nkw=canyon+grail")
+    print(f"eBay Status: {r_ebay.status_code} | Length: {len(r_ebay.text)}")
+    
+    print("Testing Allegro...")
+    r_allegro = _get("https://allegro.pl/listing?string=canyon+grail")
+    print(f"Allegro Status: {r_allegro.status_code} | Length: {len(r_allegro.text)}")
+    
+    # main() # Keep your main function commented out until these return 200
