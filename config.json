@@ -3,7 +3,7 @@
     "query": "Canyon grizl",
     "required_keywords": ["grizl"],
     "platforms": ["kleinanzeigen", "olx"],
-    "reference_image": "grizl.jpeg",
+    "reference_image": "grizl.png",
     "similarity_threshold": 0.82
   },
   "email": {

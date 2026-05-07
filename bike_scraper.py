@@ -30,10 +30,12 @@ from ultralytics import YOLO
 # ──────────────────────────────────────────────
 CONFIG_FILE    = Path(__file__).parent / "config.json"
 SEEN_FILE      = Path(__file__).parent / "seen_listings.json"
+TEMPLATE_DIR   = Path(__file__).parent / "templates"
 
-# Force CPU execution for GitHub Actions
+# Force CPU execution for GitHub Actions - sufficient for inference
 DEVICE = torch.device("cpu")
 
+# headers for the scraping 
 HEADERS_DE = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8",
@@ -45,51 +47,79 @@ HEADERS = {"Accept-Language": "en-US,en;q=0.9"}
 # ML Setup (YOLO & DINOv2)
 # ──────────────────────────────────────────────
 print("Loading ML Models...")
-# YOLO Nano for fast object detection
+
+# 1. Object Detection (YOLOv8 Nano)
+# We use YOLO (You Only Look Once) to find the actual bike in the image and draw a bounding box around it.
+# This prevents background elements (like trees, cars, or walls) from confusing the visual similarity check.
+# 'yolov8n.pt' is the smallest and fastest version of YOLOv8, which is perfect for this usecase.
 yolo_model = YOLO('yolov8n.pt') 
 
-# DINOv2 Small for robust image embedding
+# 2. Image Embedding / Feature Extraction (DINOv2)
+# DINOv2 is a state-of-the-art vision model by Meta that understands image features without labels.
+# It converts an image into a embedding representing its visual characteristics.
+# We use the 'vits14' (Vision Transformer Small) variant, mapping it to the chosen device (CPU/GPU).
 dino_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14').to(DEVICE)
-dino_model.eval()
+dino_model.eval() # Set to evaluation mode (disables training-specific layers like dropout)
 
-# DINOv2 required transforms
+# 3. Image Preprocessing Pipeline
+# DINOv2 expects images in a very specific format and size.
+# This pipeline standardizes any input image before feeding it into the DINOv2 model.
 transform = T.Compose([
+    # Resize the smaller edge to 256 pixels while maintaining aspect ratio (using high-quality BICUBIC interpolation)
     T.Resize(256, interpolation=T.InterpolationMode.BICUBIC),
+    # Extract the central 224x224 pixel square (standard input size for Vision Transformers)
     T.CenterCrop(224),
+    # Convert the PIL image to a PyTorch tensor (pixels become values between 0.0 and 1.0)
     T.ToTensor(),
+    # Normalize the pixel values using standard ImageNet mean and standard deviation.
+    # This centers the data around 0, helping the neural network process it more effectively.
     T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
 ])
 
 def process_image(img: Image.Image) -> torch.Tensor:
-    """Crops the bike using YOLO, then embeds it with DINO."""
-    # 1. Run YOLO to find bounding boxes
+    """
+    Takes a raw PIL image, crops the bike using YOLO, and computes its visual embedding using DINOv2.
+    """
+    # 1. Run YOLO object detection to find bounding boxes for all objects in the image
     results = yolo_model(img, verbose=False)
     
     cropped_img = img
     for r in results:
         boxes = r.boxes
         for box in boxes:
-            # Class 1 is 'bicycle' in COCO dataset
+            # Check if the detected object is a 'bicycle' (Class 1 in the standard COCO dataset)
             if int(box.cls[0]) == 1: 
+                # Extract the top-left (x1, y1) and bottom-right (x2, y2) coordinates of the bounding box
                 x1, y1, x2, y2 = box.xyxy[0].int().tolist()
-                # Expand box slightly for context
+                
+                # Expand the bounding box slightly (by 10 pixels) to include some context around the bike
+                # This ensures we don't accidentally clip edges of the tires or handlebars
                 w, h = img.size
                 x1, y1 = max(0, x1-10), max(0, y1-10)
                 x2, y2 = min(w, x2+10), min(h, y2+10)
+                
+                # Crop the original image to just the expanded bounding box
                 cropped_img = img.crop((x1, y1, x2, y2))
-                break # Just take the first bike found
+                break # Just take the first bike found (assuming the main subject is the first/most prominent detection)
     
-    # 2. Transform and Embed
+    # 2. Transform the cropped image (resize, crop to 224x224, normalize) and add a batch dimension
+    # unsqueeze(0) changes shape from [Channels, Height, Width] to [Batch=1, Channels, Height, Width]
     img_t = transform(cropped_img).unsqueeze(0).to(DEVICE)
+    
+    # 3. Generate the visual embedding (vector representation)
+    # torch.no_grad() saves memory and speeds up execution by disabling gradient calculation (we aren't training)
     with torch.no_grad():
         embedding = dino_model(img_t)
         
+    # 4. L2 Normalize the final embedding vector.
+    # This scales the vector to have a length of 1, which makes cosine similarity calculations mathematically sound and stable.
     return F.normalize(embedding, p=2, dim=1)
 
 def get_embedding_from_url(url: str) -> torch.Tensor:
     try:
         resp = requests.get(url, timeout=10)
         img = Image.open(BytesIO(resp.content)).convert("RGB")
+        # runs the image feature extraction after receiving the image
         return process_image(img)
     except Exception as e:
         print(f"    [!] Failed to process image URL {url}: {e}")
@@ -215,61 +245,39 @@ def scrape_olx(query: str, required: list[str]) -> list[dict]:
     return listings
 
 # ──────────────────────────────────────────────
-# Email Templates (Updated for Images)
+# Email Handling
 # ──────────────────────────────────────────────
-EMAIL_HTML = """\
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-  body {{ font-family: sans-serif; background: #f0f4f8; margin: 0; padding: 0; }}
-  .wrapper {{ max-width: 680px; margin: 30px auto; background: #fff; border-radius: 14px; padding-bottom: 20px; box-shadow: 0 6px 28px rgba(0,0,0,.10); }}
-  .header {{ background: #0f1923; color: #fff; padding: 30px; }}
-  .card {{ display: flex; margin: 15px 20px; border: 1px solid #e4e9f0; border-radius: 10px; overflow: hidden; }}
-  .card img {{ width: 150px; height: 150px; object-fit: cover; border-right: 1px solid #e4e9f0; }}
-  .card-content {{ padding: 15px; display: flex; flex-direction: column; justify-content: center; }}
-  .card a.title {{ font-size: 16px; font-weight: 600; color: #0f1923; text-decoration: none; }}
-  .price {{ font-size: 17px; font-weight: 700; color: #e84545; margin-top: 6px; }}
-  .meta {{ font-size: 12px; color: #7a8899; margin-top: 4px; }}
-  .score {{ margin-top: 8px; font-size: 13px; font-weight: bold; color: #2ecc71; }}
-</style>
-</head>
-<body>
-<div class="wrapper">
-  <div class="header">
-    <h2>🚴 Stolen Bike Match Alerts</h2>
-    <p>{date} - Found {count} visual match(es)</p>
-  </div>
-  {cards}
-</div>
-</body>
-</html>
-"""
-
-CARD_TMPL = """\
-<div class="card">
-  <img src="{image_url}" alt="Listing Thumbnail" />
-  <div class="card-content">
-    <a class="title" href="{url}">{title}</a>
-    <div class="price">{price}</div>
-    <div class="meta">📍 {location} | Source: {source}</div>
-    <div class="score">Visual Match: {similarity_score:.1f}%</div>
-  </div>
-</div>
-"""
-
 def build_html(new_listings: list[dict]) -> str:
-    cards = "".join(CARD_TMPL.format(**{
+    """Builds the HTML for the email from templates."""
+    try:
+        with open(TEMPLATE_DIR / "email_layout.html", "r", encoding="utf-8") as f:
+            layout_tmpl = f.read()
+        with open(TEMPLATE_DIR / "email_card.html", "r", encoding="utf-8") as f:
+            card_tmpl = f.read()
+    except FileNotFoundError as e:
+        print(f"❌ Email template not found: {e}. Cannot build email.")
+        return ""
+
+    cards = "".join(card_tmpl.format(**{
         **i, 
         "image_url": i.get("image_url") or "https://via.placeholder.com/150",
         "similarity_score": i.get("similarity_score", 0) * 100
     }) for i in new_listings)
-    return EMAIL_HTML.format(date=datetime.now().strftime("%B %d, %Y"), count=len(new_listings), cards=cards)
+    
+    return layout_tmpl.format(
+        date=datetime.now().strftime("%B %d, %Y"), 
+        count=len(new_listings), 
+        cards=cards
+    )
 
 def send_email(cfg: dict, new_listings: list[dict]) -> None:
     if not new_listings:
         print("No visually matching listings – skipping email.")
         return
+
+    html_content = build_html(new_listings)
+    if not html_content:
+        return  # Error message already printed in build_html
 
     sender = cfg["email"]["sender"]
     recipient = cfg["email"]["recipient"]
@@ -280,7 +288,7 @@ def send_email(cfg: dict, new_listings: list[dict]) -> None:
     msg["From"] = sender
     msg["To"] = recipient
     msg.attach(MIMEText("Matches found. View email in HTML mode.", "plain", "utf-8"))
-    msg.attach(MIMEText(build_html(new_listings), "html", "utf-8"))
+    msg.attach(MIMEText(html_content, "html", "utf-8"))
 
     import smtplib
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
@@ -293,39 +301,23 @@ def send_email(cfg: dict, new_listings: list[dict]) -> None:
 # ──────────────────────────────────────────────
 SCRAPER_MAP = {"kleinanzeigen": scrape_kleinanzeigen, "olx": scrape_olx}
 
-def main() -> None:
-    cfg = load_config()
-    query = cfg["search"]["query"]
-    required = cfg["search"]["required_keywords"]
-    platforms = [p.lower() for p in cfg["search"].get("platforms", list(SCRAPER_MAP))]
-    seen = load_seen()
-
-    # Load Reference Image
-    ref_image_path = cfg["search"].get("reference_image")
-    if not ref_image_path or not Path(ref_image_path).exists():
-        print(f"❌ Error: Reference image '{ref_image_path}' not found. Cannot do visual matching.")
-        return
-    
-    print("Generating Reference Embedding...")
-    ref_img = Image.open(ref_image_path).convert("RGB")
-    reference_embedding = process_image(ref_img)
-
+def scrape_all_platforms(platforms: list[str], query: str, required: list[str]) -> list[dict]:
+    """Iterates through enabled platforms and runs their scrapers."""
     all_listings: list[dict] = []
     for platform in platforms:
         if platform in SCRAPER_MAP:
             print(f"\n── Scraping {platform} ──")
-            all_listings += SCRAPER_MAP[platform](query, required)
+            all_listings.extend(SCRAPER_MAP[platform](query, required))
+    return all_listings
 
-    new_listings = [item for item in all_listings if item["id"] not in seen]
-    print(f"\nNew (unseen) Text Matches: {len(new_listings)}")
-
-    # ──────────────────────────────────────────────
-    # Visual Matching Step
-    # ──────────────────────────────────────────────
-    threshold = cfg["search"].get("similarity_threshold", 0.85)
+def perform_visual_match(
+    listings: list[dict], 
+    reference_embedding: torch.Tensor, 
+    threshold: float
+) -> list[dict]:
+    """Filters listings by comparing their image embeddings to a reference."""
     visually_matched = []
-
-    for item in new_listings:
+    for item in listings:
         if not item.get("image_url"):
             continue
             
@@ -339,8 +331,46 @@ def main() -> None:
             if similarity >= threshold:
                 item["similarity_score"] = similarity
                 visually_matched.append(item)
+    return visually_matched
 
-    # Save IDs to seen cache
+def main() -> None:
+    """
+    Main execution pipeline for the bike scraper:
+    1. Loads configuration, search keywords, and history of seen listings.
+    2. Generates a visual embedding for the reference image (the bike to look for).
+    3. Scrapes selected platforms for listings that match the text keywords.
+    4. Downloads images of new unseen listings and computes their visual embeddings.
+    5. Compares listing images to the reference using cosine similarity.
+    6. Sends an email alert with listings that meet the visual similarity threshold and updates the seen cache.
+    """
+    cfg = load_config()
+    query = cfg["search"]["query"]
+    required = cfg["search"]["required_keywords"]
+    platforms = [p.lower() for p in cfg["search"].get("platforms", list(SCRAPER_MAP))]
+    seen = load_seen()
+
+    # 1. Generate Reference Embedding
+    ref_image_path = cfg["search"].get("reference_image")
+    if not ref_image_path or not Path(ref_image_path).exists():
+        print(f"❌ Error: Reference image '{ref_image_path}' not found. Cannot do visual matching.")
+        return
+    
+    print("Generating Reference Embedding...")
+    with Image.open(ref_image_path) as ref_img:
+        reference_embedding = process_image(ref_img.convert("RGB"))
+
+    # 2. Scrape platforms and filter for new items
+    all_listings = scrape_all_platforms(platforms, query, required)
+    new_listings = [item for item in all_listings if item["id"] not in seen]
+    print(f"\nNew (unseen) Text Matches: {len(new_listings)}")
+
+    # 3. Perform visual matching
+    threshold = cfg["search"].get("similarity_threshold", 0.85)
+    visually_matched = perform_visual_match(
+        new_listings, reference_embedding, threshold
+    )
+
+    # 4. Update seen cache and send email
     seen.update(item["id"] for item in all_listings)
     save_seen(seen)
 
