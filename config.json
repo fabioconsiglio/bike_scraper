@@ -1,9 +1,9 @@
 {
   "search": {
-    "query": "Schmolke Carbon",
-    "required_keywords": ["schmolke"],
+    "query": "Canyon grail",
+    "required_keywords": ["grail"],
     "platforms": ["kleinanzeigen", "olx"],
-    "reference_image": "stolen_bike.jpg",
+    "reference_image": "grail_test.jpg",
     "similarity_threshold": 0.82
   },
   "email": {
