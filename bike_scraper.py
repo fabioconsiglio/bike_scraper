@@ -279,12 +279,12 @@ def send_email(cfg: dict, new_listings: list[dict]) -> None:
 
     sender = cfg["email"]["sender"]
     recipient = cfg["email"]["recipient"]
-    password = os.environ.get("GMAIL_APP_PASSWORD") or cfg["email"].get("app_password", "")
+    password =  os.environ.get("GMAIL_APP_PASSWORD") or cfg["email"].get("app_password", "")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"🚨 {len(new_listings)} Potential Visual Match(es) Found!"
     msg["From"] = sender
-    msg["To"] = recipient
+    msg["To"] = ", ".join(recipient) if isinstance(recipient, list) else recipient
     msg.attach(MIMEText("Matches found. View email in HTML mode.", "plain", "utf-8"))
     msg.attach(MIMEText(html_content, "html", "utf-8"))
 
