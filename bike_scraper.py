@@ -99,7 +99,7 @@ def get_embedding_from_url(url: str) -> torch.Tensor:
 # Core Helpers
 # ──────────────────────────────────────────────
 def _get(url: str, headers: dict = HEADERS, timeout: int = 20):
-    browsers = ["chrome124", "chrome120", "safari17_0", "edge122"]
+    browsers = ["chrome124", "chrome120", "safari17_0", "edge101"]
     chosen_browser = random.choice(browsers)
     try:
         resp = cffi_requests.get(url, headers=headers, timeout=timeout, impersonate=chosen_browser)
