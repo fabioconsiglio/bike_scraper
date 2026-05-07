@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { font-family: sans-serif; background: #f0f4f8; margin: 0; padding: 0; }
+  .wrapper { max-width: 680px; margin: 30px auto; background: #fff; border-radius: 14px; padding-bottom: 20px; box-shadow: 0 6px 28px rgba(0,0,0,.10); }
+  .header { background: #0f1923; color: #fff; padding: 30px; }
+  .card { display: flex; margin: 15px 20px; border: 1px solid #e4e9f0; border-radius: 10px; overflow: hidden; }
+  .card img { width: 150px; height: 150px; object-fit: cover; border-right: 1px solid #e4e9f0; }
+  .card-content { padding: 15px; display: flex; flex-direction: column; justify-content: center; }
+  .card a.title { font-size: 16px; font-weight: 600; color: #0f1923; text-decoration: none; }
+  .price { font-size: 17px; font-weight: 700; color: #e84545; margin-top: 6px; }
+  .meta { font-size: 12px; color: #7a8899; margin-top: 4px; }
+  .score { margin-top: 8px; font-size: 13px; font-weight: bold; color: #2ecc71; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="header">
+    <h2>🚴 Stolen Bike Match Alerts</h2>
+    <p>{date} - Found {count} visual match(es)</p>
+  </div>
+  {cards}
+</div>
+</body>
+</html>
