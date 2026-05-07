@@ -264,11 +264,9 @@ def build_html(new_listings: list[dict]) -> str:
         "similarity_score": i.get("similarity_score", 0) * 100
     }) for i in new_listings)
     
-    return layout_tmpl.format(
-        date=datetime.now().strftime("%B %d, %Y"), 
-        count=len(new_listings), 
-        cards=cards
-    )
+    return layout_tmpl.replace("{date}", datetime.now().strftime("%B %d, %Y")) \
+                      .replace("{count}", str(len(new_listings))) \
+                      .replace("{cards}", cards)
 
 def send_email(cfg: dict, new_listings: list[dict]) -> None:
     if not new_listings:
