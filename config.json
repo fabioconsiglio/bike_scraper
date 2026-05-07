@@ -3,8 +3,9 @@
     "query": "Canyon grizl",
     "required_keywords": ["grizl"],
     "platforms": ["kleinanzeigen", "olx"],
-    "reference_image": "grizl.png",
-    "similarity_threshold": 0.82
+    "reference_image": "your_bike.png",
+    "similarity_threshold": 0.8,
+    "color_threshold": 0.4
   },
   "email": {
     "sender": "fabi.mahner@gmail.com",

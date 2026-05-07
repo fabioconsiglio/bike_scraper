@@ -25,6 +25,9 @@ import torchvision.transforms as T
 from PIL import Image
 from ultralytics import YOLO
 
+import cv2
+import numpy as np 
+
 # ──────────────────────────────────────────────
 # Paths & Settings
 # ──────────────────────────────────────────────
@@ -44,86 +47,69 @@ HEADERS_PL = {**HEADERS_DE, "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8"}
 HEADERS = {"Accept-Language": "en-US,en;q=0.9"}
 
 # ──────────────────────────────────────────────
-# ML Setup (YOLO & DINOv2)
+# ML Setup (YOLO, DINOv2, & OpenCV)
 # ──────────────────────────────────────────────
 print("Loading ML Models...")
 
-# 1. Object Detection (YOLOv8 Nano)
-# We use YOLO (You Only Look Once) to find the actual bike in the image and draw a bounding box around it.
-# This prevents background elements (like trees, cars, or walls) from confusing the visual similarity check.
-# 'yolov8n.pt' is the smallest and fastest version of YOLOv8, which is perfect for this usecase.
 yolo_model = YOLO('yolov8n.pt') 
-
-# 2. Image Embedding / Feature Extraction (DINOv2)
-# DINOv2 is a state-of-the-art vision model by Meta that understands image features without labels.
-# It converts an image into a embedding representing its visual characteristics.
-# We use the 'vits14' (Vision Transformer Small) variant, mapping it to the chosen device (CPU/GPU).
 dino_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14').to(DEVICE)
-dino_model.eval() # Set to evaluation mode (disables training-specific layers like dropout)
+dino_model.eval() 
 
-# 3. Image Preprocessing Pipeline
-# DINOv2 expects images in a very specific format and size.
-# This pipeline standardizes any input image before feeding it into the DINOv2 model.
 transform = T.Compose([
-    # Resize the smaller edge to 256 pixels while maintaining aspect ratio (using high-quality BICUBIC interpolation)
     T.Resize(256, interpolation=T.InterpolationMode.BICUBIC),
-    # Extract the central 224x224 pixel square (standard input size for Vision Transformers)
     T.CenterCrop(224),
-    # Convert the PIL image to a PyTorch tensor (pixels become values between 0.0 and 1.0)
     T.ToTensor(),
-    # Normalize the pixel values using standard ImageNet mean and standard deviation.
-    # This centers the data around 0, helping the neural network process it more effectively.
     T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
 ])
 
-def process_image(img: Image.Image) -> torch.Tensor:
-    """
-    Takes a raw PIL image, crops the bike using YOLO, and computes its visual embedding using DINOv2.
-    """
-    # 1. Run YOLO object detection to find bounding boxes for all objects in the image
+def get_color_histogram(cropped_pil_img: Image.Image) -> np.ndarray:
+    """Extracts a normalized HSV color histogram from a cropped image."""
+    cv_img = cv2.cvtColor(np.array(cropped_pil_img), cv2.COLOR_RGB2BGR)
+    hsv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv_img], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256])
+    cv2.normalize(hist, hist)
+    return hist.flatten()
+
+def color_similarity(hist1: np.ndarray, hist2: np.ndarray) -> float:
+    """Compares two histograms. Returns a score from -1.0 to 1.0."""
+    return cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
+
+def process_image(img: Image.Image) -> tuple[torch.Tensor, np.ndarray]:
+    """Crops the bike using YOLO, then returns its DINO embedding AND Color Histogram."""
     results = yolo_model(img, verbose=False)
     
     cropped_img = img
     for r in results:
         boxes = r.boxes
         for box in boxes:
-            # Check if the detected object is a 'bicycle' (Class 1 in the standard COCO dataset)
-            if int(box.cls[0]) == 1: 
-                # Extract the top-left (x1, y1) and bottom-right (x2, y2) coordinates of the bounding box
+            if int(box.cls[0]) == 1: # Bicycle
                 x1, y1, x2, y2 = box.xyxy[0].int().tolist()
-                
-                # Expand the bounding box slightly (by 10 pixels) to include some context around the bike
-                # This ensures we don't accidentally clip edges of the tires or handlebars
                 w, h = img.size
                 x1, y1 = max(0, x1-10), max(0, y1-10)
                 x2, y2 = min(w, x2+10), min(h, y2+10)
-                
-                # Crop the original image to just the expanded bounding box
                 cropped_img = img.crop((x1, y1, x2, y2))
-                break # Just take the first bike found (assuming the main subject is the first/most prominent detection)
+                break 
     
-    # 2. Transform the cropped image (resize, crop to 224x224, normalize) and add a batch dimension
-    # unsqueeze(0) changes shape from [Channels, Height, Width] to [Batch=1, Channels, Height, Width]
+    # 1. Structural Embedding (DINOv2)
     img_t = transform(cropped_img).unsqueeze(0).to(DEVICE)
-    
-    # 3. Generate the visual embedding (vector representation)
-    # torch.no_grad() saves memory and speeds up execution by disabling gradient calculation (we aren't training)
     with torch.no_grad():
         embedding = dino_model(img_t)
-        
-    # 4. L2 Normalize the final embedding vector.
-    # This scales the vector to have a length of 1, which makes cosine similarity calculations mathematically sound and stable.
-    return F.normalize(embedding, p=2, dim=1)
+    normalized_embedding = F.normalize(embedding, p=2, dim=1)
+    
+    # 2. Color Profile (OpenCV)
+    color_hist = get_color_histogram(cropped_img)
+    
+    return normalized_embedding, color_hist
 
-def get_embedding_from_url(url: str) -> torch.Tensor:
+def get_features_from_url(url: str) -> tuple[torch.Tensor, np.ndarray]:
+    """Downloads an image and extracts both structural and color features."""
     try:
         resp = requests.get(url, timeout=10)
         img = Image.open(BytesIO(resp.content)).convert("RGB")
-        # runs the image feature extraction after receiving the image
         return process_image(img)
     except Exception as e:
         print(f"    [!] Failed to process image URL {url}: {e}")
-        return None
+        return None, None
 
 # ──────────────────────────────────────────────
 # Core Helpers
@@ -308,54 +294,54 @@ def scrape_all_platforms(platforms: list[str], query: str, required: list[str]) 
             all_listings.extend(SCRAPER_MAP[platform](query, required))
     return all_listings
 
+
 def perform_visual_match(
     listings: list[dict], 
     reference_embedding: torch.Tensor, 
-    threshold: float
+    reference_color_hist: np.ndarray,
+    dino_threshold: float,
+    color_threshold: float
 ) -> list[dict]:
-    """Filters listings by comparing their image embeddings to a reference."""
+    """Filters listings by comparing both their image embeddings and color histograms to a reference."""
     visually_matched = []
     for item in listings:
         if not item.get("image_url"):
             continue
             
         print(f"Analyzing Image for: {item['title'][:30]}...")
-        listing_emb = get_embedding_from_url(item["image_url"])
+        listing_emb, listing_color = get_features_from_url(item["image_url"])
         
-        if listing_emb is not None:
-            similarity = F.cosine_similarity(reference_embedding, listing_emb).item()
-            print(f"  -> Similarity: {similarity:.2f}")
+        if listing_emb is not None and listing_color is not None:
+            # Calculate both scores
+            dino_sim = F.cosine_similarity(reference_embedding, listing_emb).item()
+            color_sim = color_similarity(reference_color_hist, listing_color)
             
-            if similarity >= threshold:
-                item["similarity_score"] = similarity
+            print(f"  -> Structure: {dino_sim:.2f} | Color: {color_sim:.2f}")
+            
+            # Must pass BOTH thresholds
+            if dino_sim >= dino_threshold and color_sim >= color_threshold:
+                item["similarity_score"] = dino_sim
+                item["color_score"] = color_sim
                 visually_matched.append(item)
+                
     return visually_matched
 
 def main() -> None:
-    """
-    Main execution pipeline for the bike scraper:
-    1. Loads configuration, search keywords, and history of seen listings.
-    2. Generates a visual embedding for the reference image (the bike to look for).
-    3. Scrapes selected platforms for listings that match the text keywords.
-    4. Downloads images of new unseen listings and computes their visual embeddings.
-    5. Compares listing images to the reference using cosine similarity.
-    6. Sends an email alert with listings that meet the visual similarity threshold and updates the seen cache.
-    """
     cfg = load_config()
     query = cfg["search"]["query"]
     required = cfg["search"]["required_keywords"]
     platforms = [p.lower() for p in cfg["search"].get("platforms", list(SCRAPER_MAP))]
     seen = load_seen()
 
-    # 1. Generate Reference Embedding
+    # 1. Generate Reference Features
     ref_image_path = cfg["search"].get("reference_image")
     if not ref_image_path or not Path(ref_image_path).exists():
         print(f"❌ Error: Reference image '{ref_image_path}' not found. Cannot do visual matching.")
         return
     
-    print("Generating Reference Embedding...")
+    print("Generating Reference Features...")
     with Image.open(ref_image_path) as ref_img:
-        reference_embedding = process_image(ref_img.convert("RGB"))
+        reference_embedding, reference_color_hist = process_image(ref_img.convert("RGB"))
 
     # 2. Scrape platforms and filter for new items
     all_listings = scrape_all_platforms(platforms, query, required)
@@ -363,9 +349,11 @@ def main() -> None:
     print(f"\nNew (unseen) Text Matches: {len(new_listings)}")
 
     # 3. Perform visual matching
-    threshold = cfg["search"].get("similarity_threshold", 0.85)
+    dino_threshold = cfg["search"].get("similarity_threshold") # Fallback to 
+    color_threshold = cfg["search"].get("color_threshold") # Fallback to 0.50 if not in config
+    
     visually_matched = perform_visual_match(
-        new_listings, reference_embedding, threshold
+        new_listings, reference_embedding, reference_color_hist, dino_threshold, color_threshold
     )
 
     # 4. Update seen cache and send email
