@@ -39,11 +39,6 @@ bike-scraper/
     "platforms": ["kleinanzeigen", "olx"],
     "reference_image": "your_bike.png",
     "similarity_threshold": 0.82
-  },
-  "email": {
-    "sender": "your.gmail@gmail.com",
-    "recipient": "your.gmail@gmail.com",
-    "app_password": ""
   }
 }
 ```

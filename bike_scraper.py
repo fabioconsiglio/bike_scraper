@@ -277,9 +277,14 @@ def send_email(cfg: dict, new_listings: list[dict]) -> None:
     if not html_content:
         return  # Error message already printed in build_html
 
-    sender = cfg["email"]["sender"]
-    recipient = cfg["email"]["recipient"]
-    password =  os.environ.get("GMAIL_APP_PASSWORD") or cfg["email"].get("app_password", "")
+    sender = os.environ.get("SENDER") or cfg.get("email", {}).get("sender")
+    recipient_env = os.environ.get("RECIPIENT")
+    recipient = recipient_env if recipient_env else cfg.get("email", {}).get("recipient")
+    password = os.environ.get("GMAIL_APP_PASSWORD") or cfg.get("email", {}).get("app_password", "")
+
+    if not sender or not recipient or not password:
+        print("❌ Email credentials (SENDER, RECIPIENT, GMAIL_APP_PASSWORD) missing. Cannot send email.")
+        return
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"🚨 {len(new_listings)} Potential Visual Match(es) Found!"

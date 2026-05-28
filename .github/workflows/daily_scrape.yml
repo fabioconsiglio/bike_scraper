@@ -44,4 +44,7 @@ jobs:
       - name: Run Scraper
         env:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SENDER: ${{ secrets.SENDER }}
+          RECIPIENT: ${{ secrets.RECIPIENT }}
+          
         run: python bike_scraper.py
